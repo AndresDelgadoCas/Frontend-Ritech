@@ -1,3 +1,4 @@
+
 const API_BASE_URL = "https://backend-ritech.onrender.com/api";
 
 export interface TraceabilityClient {
@@ -67,7 +68,7 @@ async function handleResponse<T>(response: Response): Promise<T> {
     const message = await response.text();
 
     throw new Error(
-      message || `Error ${response.status}: ${response.statusText}`
+      message || `Error ${response.status}: ${response.statusText}`,
     );
   }
 
@@ -75,7 +76,7 @@ async function handleResponse<T>(response: Response): Promise<T> {
 }
 
 export async function getTraceabilityReport(
-  orderId: number
+  orderId: number,
 ): Promise<TraceabilityReport> {
   if (!Number.isInteger(orderId) || orderId <= 0) {
     throw new Error("El ID de la orden de exportación no es válido.");
@@ -88,7 +89,7 @@ export async function getTraceabilityReport(
       headers: {
         Accept: "application/json",
       },
-    }
+    },
   );
 
   return handleResponse<TraceabilityReport>(response);

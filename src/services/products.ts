@@ -1,4 +1,6 @@
+
 const API_BASE = "https://backend-ritech.onrender.com/api/products";
+const AUTH_BASE = "https://backend-ritech.onrender.com/api/auth";
 
 export interface Product {
   id: number;
@@ -16,21 +18,54 @@ export interface ProductInput {
   unitOfMeasure: string;
 }
 
+interface CsrfResponse {
+  token: string;
+}
+
+async function getCsrfToken(): Promise<string> {
+  const response = await fetch(`${AUTH_BASE}/csrf`, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error("No se pudo obtener el token CSRF.");
+  }
+
+  const data = (await response.json()) as CsrfResponse;
+
+  if (!data.token) {
+    throw new Error("El backend no devolvió un token CSRF válido.");
+  }
+
+  return data.token;
+}
+
 async function request<T>(
   path = "",
   options: RequestInit = {},
 ): Promise<T> {
+  const method = (options.method ?? "GET").toUpperCase();
+  const headers = new Headers(options.headers);
+
+  headers.set("Content-Type", "application/json");
+
+  if (!["GET", "HEAD", "OPTIONS", "TRACE"].includes(method)) {
+    const csrfToken = await getCsrfToken();
+    headers.set("X-XSRF-TOKEN", csrfToken);
+  }
+
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
+    method,
     credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
+    headers,
   });
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
+
     const message =
       typeof body.message === "string"
         ? body.message

@@ -1,4 +1,6 @@
+
 const API_BASE = "https://backend-ritech.onrender.com/api/producers";
+const AUTH_BASE = "https://backend-ritech.onrender.com/api/auth";
 
 export interface Producer {
   id: number;
@@ -18,15 +20,28 @@ export interface ProducerInput {
   productType: "COFFEE" | "COCOA";
 }
 
-function getCookie(name: string): string | null {
-  const prefix = `${name}=`;
-  const cookie = document.cookie
-    .split("; ")
-    .find((item) => item.startsWith(prefix));
+interface CsrfResponse {
+  token: string;
+}
 
-  return cookie
-    ? decodeURIComponent(cookie.substring(prefix.length))
-    : null;
+async function getCsrfToken(): Promise<string> {
+  const response = await fetch(`${AUTH_BASE}/csrf`, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error("No se pudo obtener el token CSRF.");
+  }
+
+  const data = (await response.json()) as CsrfResponse;
+
+  if (!data.token) {
+    throw new Error("El backend no devolvió un token CSRF válido.");
+  }
+
+  return data.token;
 }
 
 async function request<T>(
@@ -39,11 +54,8 @@ async function request<T>(
   headers.set("Content-Type", "application/json");
 
   if (!["GET", "HEAD", "OPTIONS", "TRACE"].includes(method)) {
-    const csrfToken = getCookie("XSRF-TOKEN");
-
-    if (csrfToken) {
-      headers.set("X-XSRF-TOKEN", csrfToken);
-    }
+    const csrfToken = await getCsrfToken();
+    headers.set("X-XSRF-TOKEN", csrfToken);
   }
 
   const response = await fetch(`${API_BASE}${path}`, {
