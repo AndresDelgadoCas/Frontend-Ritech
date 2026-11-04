@@ -425,7 +425,10 @@ function App() {
 
     try {
       const response = await fetch(
-  "https://backend-ritech.onrender.com/api/reports/stock-by-product-type"
+        "https://backend-ritech.onrender.com/api/reports/stock-by-product-type",
+        {
+          credentials: "include",
+        },
       );
 
       if (!response.ok) throw new Error(`Error HTTP ${response.status}`);
