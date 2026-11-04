@@ -1,5 +1,4 @@
-
-const API_BASE = "/api/export-documents";
+const API_BASE = "https://backend-ritech.onrender.com/api/export-documents";
 
 export type DocumentStatus = "PENDING" | "GENERATED" | "APPROVED";
 
@@ -61,7 +60,7 @@ async function request<T>(
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     method,
-    credentials: "same-origin",
+    credentials: "include",
     headers,
   });
 

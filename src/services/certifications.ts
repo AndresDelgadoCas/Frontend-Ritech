@@ -1,5 +1,4 @@
-
-const API_BASE = "/api/certifications";
+const API_BASE = "https://backend-ritech.onrender.com/api/certifications";
 
 export type CertificationStatus = "VALID" | "EXPIRED" | "PENDING";
 
@@ -58,7 +57,7 @@ async function request<T>(
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     method,
-    credentials: "same-origin",
+    credentials: "include",
     headers,
   });
 

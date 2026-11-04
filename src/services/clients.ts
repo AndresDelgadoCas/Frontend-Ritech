@@ -1,5 +1,4 @@
-
-const API_BASE = "/api/clients";
+const API_BASE = "https://backend-ritech.onrender.com/api/clients";
 
 export interface Client {
   id: number;
@@ -52,7 +51,7 @@ async function request<T>(
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     method,
-    credentials: "same-origin",
+    credentials: "include",
     headers,
   });
 

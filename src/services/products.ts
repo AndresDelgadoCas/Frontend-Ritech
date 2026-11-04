@@ -1,5 +1,4 @@
-
-const API_BASE = "/api/products";
+const API_BASE = "https://backend-ritech.onrender.com/api/products";
 
 export interface Product {
   id: number;
@@ -23,7 +22,7 @@ async function request<T>(
 ): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
-    credentials: "same-origin",
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...options.headers,

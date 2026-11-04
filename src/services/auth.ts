@@ -1,4 +1,3 @@
-
 export type UserRole =
   | "ADMINISTRADOR"
   | "COMPRAS"
@@ -24,7 +23,7 @@ interface ApiError {
 }
 
 const API_BASE =
-  import.meta.env.VITE_API_URL || "http://localhost:8080";
+  import.meta.env.VITE_API_URL || "https://backend-ritech.onrender.com";
 
 async function getCsrfToken(): Promise<string> {
   const response = await fetch(`${API_BASE}/api/auth/csrf`, {

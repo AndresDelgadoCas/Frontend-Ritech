@@ -1,5 +1,5 @@
-
 import { useCallback, useEffect, useMemo, useState } from "react";
+
 import {
   Activity,
   ArrowRight,
@@ -23,6 +23,7 @@ import {
   Users,
   Warehouse,
 } from "lucide-react";
+
 import {
   Area,
   AreaChart,
@@ -32,6 +33,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+
 import "./App.css";
 
 type Section =
@@ -52,6 +54,14 @@ type StockRow = {
   productType: string;
   availableStockKg: number;
 };
+
+/**
+ * URL del backend.
+ * En Render se utiliza VITE_API_URL.
+ * En desarrollo local se utiliza localhost.
+ */
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL || "http://localhost:8080";
 
 const groups = [
   {
@@ -145,7 +155,11 @@ function App() {
 
     try {
       const response = await fetch(
-        "/api/reports/stock-by-product-type",
+        `${API_BASE_URL}/api/reports/stock-by-product-type`,
+        {
+          method: "GET",
+          credentials: "include",
+        },
       );
 
       if (!response.ok) {
@@ -153,10 +167,13 @@ function App() {
       }
 
       const data: unknown = await response.json();
+
       setStock(parseStockResponse(data));
-    } catch {
+    } catch (error) {
+      console.error("Error consultando el inventario:", error);
+
       setStockError(
-        "No se pudo consultar el inventario. Verifica que el backend esté funcionando y que el proxy de Vite esté configurado.",
+        "No se pudo consultar el inventario. Verifica que el backend esté funcionando y que la URL de la API esté configurada correctamente.",
       );
     } finally {
       setLoadingStock(false);
@@ -190,13 +207,13 @@ function App() {
     0,
   );
 
-  const coffeeStock = stock.find(
-    (item) => item.productType === "COFFEE",
-  )?.availableStockKg ?? 0;
+  const coffeeStock =
+    stock.find((item) => item.productType === "COFFEE")
+      ?.availableStockKg ?? 0;
 
-  const cocoaStock = stock.find(
-    (item) => item.productType === "COCOA",
-  )?.availableStockKg ?? 0;
+  const cocoaStock =
+    stock.find((item) => item.productType === "COCOA")
+      ?.availableStockKg ?? 0;
 
   const selectSection = (nextSection: Section) => {
     setSection(nextSection);
@@ -359,7 +376,7 @@ function App() {
 
                 <div className="banner-status">
                   <span />
-                  Conexión local
+                  Conexión con el backend
                 </div>
               </section>
 
@@ -369,7 +386,9 @@ function App() {
                   <button
                     type="button"
                     className="text-link"
-                    onClick={() => setRefreshKey((value) => value + 1)}
+                    onClick={() =>
+                      setRefreshKey((value) => value + 1)
+                    }
                   >
                     Reintentar
                   </button>
@@ -736,7 +755,7 @@ function App() {
             </span>
             <span>
               <span className="footer-online" />
-              Aplicación local
+              Aplicación conectada
             </span>
           </footer>
         </div>

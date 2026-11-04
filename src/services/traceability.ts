@@ -1,5 +1,4 @@
-
-const API_BASE_URL = "/api";
+const API_BASE_URL = "https://backend-ritech.onrender.com/api";
 
 export interface TraceabilityClient {
   id: number;
@@ -85,7 +84,7 @@ export async function getTraceabilityReport(
   const response = await fetch(
     `${API_BASE_URL}/reports/traceability/${orderId}`,
     {
-      credentials: "same-origin",
+      credentials: "include",
       headers: {
         Accept: "application/json",
       },

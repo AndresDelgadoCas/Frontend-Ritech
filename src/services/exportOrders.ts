@@ -1,5 +1,5 @@
-
-const API_BASE = "/api/export-orders";
+const API_BASE =
+  "https://backend-ritech.onrender.com/api/export-orders";
 
 export type ExportOrderStatus =
   | "DRAFT"
@@ -68,7 +68,7 @@ async function request<T>(
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     method,
-    credentials: "same-origin",
+    credentials: "include",
     headers,
   });
 

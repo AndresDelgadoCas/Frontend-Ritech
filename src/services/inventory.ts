@@ -1,5 +1,5 @@
-
-const API_BASE = "/api/inventory-lots";
+const API_BASE =
+  "https://backend-ritech.onrender.com/api/inventory-lots";
 
 export type InventoryLotStatus = "AVAILABLE" | "RESERVED" | "EXPORTED";
 
@@ -64,7 +64,7 @@ async function request<T>(
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     method,
-    credentials: "same-origin",
+    credentials: "include",
     headers,
   });
 
