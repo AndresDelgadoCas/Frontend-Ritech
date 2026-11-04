@@ -1,5 +1,5 @@
-
-const API_BASE_URL = "/api";
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL || "http://localhost:8080";
 
 export interface StockReportItem {
   productType: string;
@@ -14,8 +14,9 @@ export interface ExportedVolumeItem {
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const message = await response.text();
+
     throw new Error(
-      message || `Error ${response.status}: ${response.statusText}`
+      message || `Error ${response.status}: ${response.statusText}`,
     );
   }
 
@@ -27,7 +28,11 @@ async function handleResponse<T>(response: Response): Promise<T> {
  */
 export async function getStockReport(): Promise<StockReportItem[]> {
   const response = await fetch(
-    `${API_BASE_URL}/reports/stock-by-product-type`
+    `${API_BASE_URL}/api/reports/stock-by-product-type`,
+    {
+      method: "GET",
+      credentials: "include",
+    },
   );
 
   return handleResponse<StockReportItem[]>(response);
@@ -40,7 +45,11 @@ export async function getMonthlyExportedVolume(): Promise<
   ExportedVolumeItem[]
 > {
   const response = await fetch(
-    `${API_BASE_URL}/reports/exported-volume/monthly`
+    `${API_BASE_URL}/api/reports/exported-volume/monthly`,
+    {
+      method: "GET",
+      credentials: "include",
+    },
   );
 
   return handleResponse<ExportedVolumeItem[]>(response);
