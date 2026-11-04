@@ -30,6 +30,7 @@ async function getCsrfToken(): Promise<string> {
   const response = await fetch(`${API_BASE}/api/auth/csrf`, {
     method: "GET",
     credentials: "include",
+    cache: "no-store",
   });
 
   if (!response.ok) {
@@ -37,6 +38,13 @@ async function getCsrfToken(): Promise<string> {
   }
 
   const data = (await response.json()) as CsrfResponse;
+
+  // El token devuelto por el backend debe ser el que se envía
+  // en el encabezado X-XSRF-TOKEN.
+  if (!data.token) {
+    throw new Error("El backend no devolvió un token CSRF válido.");
+  }
+
   return data.token;
 }
 
@@ -66,7 +74,7 @@ async function request<T>(
 
     if (response.status === 403) {
       throw new Error(
-        "No tienes permiso para realizar esta operación.",
+        "La solicitud fue rechazada por seguridad o por falta de permisos.",
       );
     }
 
