@@ -424,9 +424,9 @@ function App() {
     setStockError("");
 
     try {
-      const response = await fetch("/api/reports/stock-by-product-type", {
-        credentials: "same-origin",
-      });
+      const response = await fetch(
+  "https://backend-ritech.onrender.com/api/reports/stock-by-product-type"
+      );
 
       if (!response.ok) throw new Error(`Error HTTP ${response.status}`);
 
