@@ -23,12 +23,13 @@ interface ApiError {
   message?: string;
 }
 
-const API_BASE = "/api";
+const API_BASE =
+  import.meta.env.VITE_API_URL || "http://localhost:8080";
 
 async function getCsrfToken(): Promise<string> {
-  const response = await fetch(`${API_BASE}/auth/csrf`, {
+  const response = await fetch(`${API_BASE}/api/auth/csrf`, {
     method: "GET",
-    credentials: "same-origin",
+    credentials: "include",
   });
 
   if (!response.ok) {
@@ -43,9 +44,9 @@ async function request<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${API_BASE}/api${path}`, {
     ...options,
-    credentials: "same-origin",
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...options.headers,
@@ -58,11 +59,15 @@ async function request<T>(
     )) as ApiError;
 
     if (response.status === 401) {
-      throw new Error("Tu sesión no está autenticada o tus credenciales son incorrectas.");
+      throw new Error(
+        "Tu sesión no está autenticada o tus credenciales son incorrectas.",
+      );
     }
 
     if (response.status === 403) {
-      throw new Error("No tienes permiso para realizar esta operación.");
+      throw new Error(
+        "No tienes permiso para realizar esta operación.",
+      );
     }
 
     throw new Error(error.message ?? `Error HTTP ${response.status}.`);
