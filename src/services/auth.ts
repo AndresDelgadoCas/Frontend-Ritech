@@ -1,10 +1,4 @@
-export type UserRole =
-  | "ADMINISTRADOR"
-  | "COMPRAS"
-  | "INVENTARIO"
-  | "EXPORTADOR"
-  | "VENTAS"
-  | "GERENCIA";
+export type UserRole = "ADMINISTRADOR" | "VENDEDOR" | "COMPRADOR";
 
 export interface AuthUser {
   id: number;
@@ -12,107 +6,52 @@ export interface AuthUser {
   username: string;
   email: string;
   role: UserRole;
+  roles: UserRole[];
 }
 
-interface CsrfResponse {
-  token: string;
-}
+const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:8080").replace(/\/$/, "");
 
-interface ApiError {
-  message?: string;
-}
-
-const API_BASE =
-  import.meta.env.VITE_API_URL || "https://backend-ritech.onrender.com";
-
-async function getCsrfToken(): Promise<string> {
+async function csrfToken(): Promise<string> {
   const response = await fetch(`${API_BASE}/api/auth/csrf`, {
-    method: "GET",
     credentials: "include",
     cache: "no-store",
   });
-
-  if (!response.ok) {
-    throw new Error("No se pudo obtener el token de seguridad.");
-  }
-
-  const data = (await response.json()) as CsrfResponse;
-
-  // El token devuelto por el backend debe ser el que se envía
-  // en el encabezado X-XSRF-TOKEN.
-  if (!data.token) {
-    throw new Error("El backend no devolvió un token CSRF válido.");
-  }
-
-  return data.token;
+  if (!response.ok) throw new Error("No se pudo obtener el token de seguridad.");
+  const body = (await response.json()) as { token?: string };
+  if (!body.token) throw new Error("El servidor no entregó el token CSRF.");
+  return body.token;
 }
 
-async function request<T>(
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const method = (options.method || "GET").toUpperCase();
+  const headers = new Headers(options.headers);
+  headers.set("Accept", "application/json");
+  if (options.body) headers.set("Content-Type", "application/json");
+  if (!["GET", "HEAD", "OPTIONS"].includes(method) && path !== "/auth/login") {
+    headers.set("X-XSRF-TOKEN", await csrfToken());
+  }
   const response = await fetch(`${API_BASE}/api${path}`, {
     ...options,
+    method,
+    headers,
     credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
   });
-
   if (!response.ok) {
-    const error = (await response.json().catch(
-      () => ({}),
-    )) as ApiError;
-
-    if (response.status === 401) {
-      throw new Error(
-        "Tu sesión no está autenticada o tus credenciales son incorrectas.",
-      );
-    }
-
-    if (response.status === 403) {
-      throw new Error(
-        "La solicitud fue rechazada por seguridad o por falta de permisos.",
-      );
-    }
-
-    throw new Error(error.message ?? `Error HTTP ${response.status}.`);
+    const data = await response.json().catch(() => ({})) as { message?: string; error?: string };
+    if (response.status === 401) throw new Error("La sesión ha expirado o los datos de acceso son incorrectos.");
+    if (response.status === 403) throw new Error("Tu cuenta no tiene permisos para realizar esta acción.");
+    throw new Error(data.message || data.error || `Error del servidor (${response.status}).`);
   }
-
-  if (response.status === 204) {
-    return undefined as T;
-  }
-
-  return (await response.json()) as T;
+  if (response.status === 204) return undefined as T;
+  const text = await response.text();
+  return text ? JSON.parse(text) as T : undefined as T;
 }
 
-export async function login(
-  username: string,
-  password: string,
-): Promise<AuthUser> {
-  const token = await getCsrfToken();
-
-  return request<AuthUser>("/auth/login", {
-    method: "POST",
-    headers: {
-      "X-XSRF-TOKEN": token,
-    },
-    body: JSON.stringify({ username, password }),
-  });
+export function registerBuyer(data: { fullName: string; username: string; email: string; password: string; companyName: string; country: string; phone?: string; address?: string }): Promise<{message:string}> {
+  return request<{message:string}>("/auth/register", { method: "POST", body: JSON.stringify(data) });
 }
-
-export async function getCurrentUser(): Promise<AuthUser> {
-  return request<AuthUser>("/auth/me");
+export function login(username: string, password: string): Promise<AuthUser> {
+  return request<AuthUser>("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) });
 }
-
-export async function logout(): Promise<void> {
-  const token = await getCsrfToken();
-
-  await request<{ message: string }>("/auth/logout", {
-    method: "POST",
-    headers: {
-      "X-XSRF-TOKEN": token,
-    },
-  });
-}
+export function getCurrentUser(): Promise<AuthUser> { return request<AuthUser>("/auth/me"); }
+export function logout(): Promise<void> { return request<void>("/auth/logout", { method: "POST" }); }
