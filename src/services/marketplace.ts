@@ -68,3 +68,27 @@ export const submitSellerApplication = (data: {businessName:string;contactName:s
 export const getMySellerApplications = () => request<SellerApplication[]>("/seller-applications/mine");
 export const getSellerApplications = () => request<SellerApplication[]>("/seller-applications/admin");
 export const reviewSellerApplication = (id:number, decision:"APPROVE"|"REJECT", rejectionReason?:string) => request<SellerApplication>(`/seller-applications/admin/${id}/review`, {method:"PATCH",body:JSON.stringify({decision,rejectionReason})});
+
+
+export interface SupportTicket {
+  id:number; ticketCode:string; requesterUserId:number|null; requesterName:string; requesterEmail:string;
+  requesterRole:string; category:string; subject:string; description:string; priority:string; status:string;
+  assignedTo:number|null; escalatedTo:number|null; escalationReason:string|null; resolution:string|null;
+  createdAt:string|null; updatedAt:string|null;
+}
+export interface SupportMessage { id:number; ticketId:number; senderUserId:number|null; senderType:string; senderName?:string|null; message:string; internal:boolean; createdAt:string|null }
+export interface SupportStaff { id:number; fullName:string; username:string }
+export interface FavoriteRecord { id:number; userId:number; listingId:number; createdAt:string|null }
+export const createSupportTicket = (data:{category:string;subject:string;description:string}) => request<SupportTicket>("/support/tickets",{method:"POST",body:JSON.stringify(data)});
+export const getMySupportTickets = () => request<SupportTicket[]>("/support/tickets/mine");
+export const getSupportTickets = () => request<SupportTicket[]>("/support/management/tickets");
+export const getSupportAdmins = () => request<SupportStaff[]>("/support/management/admins");
+export const getEscalatedSupportTickets = () => request<SupportTicket[]>("/support/admin/tickets/escalated");
+export const reviewEscalatedSupportTicket = (ticketId:number, decision:"APPROVE_SUSPENSION"|"REJECT_SUSPENSION"|"REACTIVATE_SELLER"|"RESOLVE", reason:string, producerId?:number) => request<SupportTicket>(`/support/admin/tickets/${ticketId}/decision`,{method:"POST",body:JSON.stringify({decision,reason,producerId})});
+export const getSupportMessages = (ticketId:number) => request<SupportMessage[]>(`/support/tickets/${ticketId}/messages`);
+export const sendSupportMessage = (ticketId:number,message:string,internal=false) => request<SupportMessage>(`/support/tickets/${ticketId}/messages`,{method:"POST",body:JSON.stringify({message,internal})});
+export const updateSupportTicket = (ticketId:number,data:{status?:string;priority?:string;resolution?:string;assignedTo?:number}) => request<SupportTicket>(`/support/management/tickets/${ticketId}`,{method:"PATCH",body:JSON.stringify(data)});
+export const escalateSupportTicket = (ticketId:number,adminUserId:number,reason:string) => request<SupportTicket>(`/support/management/tickets/${ticketId}/escalate`,{method:"POST",body:JSON.stringify({adminUserId,reason})});
+export const addFavorite = (listingId:number) => request<FavoriteRecord>(`/marketplace/favorites/${listingId}`,{method:"POST"});
+export const removeFavorite = (listingId:number) => request<void>(`/marketplace/favorites/${listingId}`,{method:"DELETE"});
+export const getFavorites = () => request<FavoriteRecord[]>("/marketplace/favorites");

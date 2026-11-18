@@ -6,9 +6,10 @@ import {
 
   Activity, ArrowRight, BadgeCheck, Check, ClipboardList,
 
-  Coffee, Factory, FileClock, Leaf, LogOut, Menu, Package, Plus, Search,
+  Coffee, Factory, FileClock, Heart, Leaf, LogOut, Menu, Package, Plus, Search,
 
   ShieldCheck, ShoppingBag, ShoppingCart, Sprout, Users, Warehouse, X,
+  ArrowLeft, Clock3, Inbox, MessageCircle, Send, UserRound,
 
 } from "lucide-react";
 
@@ -24,7 +25,8 @@ import {
 
   getMyLots, getMyOrders, getProducts, getUsers, removeCartItem, resetUserPassword,
 
-  setUserActive, updateCartItem, updateListing, updateOrderStatus,
+  setUserActive, updateCartItem, updateListing, updateOrderStatus, createSupportTicket, getMySupportTickets, getSupportTickets, updateSupportTicket, getSupportMessages, sendSupportMessage,
+  getSupportAdmins, escalateSupportTicket, reviewEscalatedSupportTicket, getFavorites, addFavorite, removeFavorite,
 
 } from "./services/marketplace";
 
@@ -32,7 +34,7 @@ import type {
 
   AuditRecord, CartView, ListingView, LotOption, OrderView, ProductOption,
 
-  ProfileOption, UserRecord, SellerApplication,
+  ProfileOption, UserRecord, SellerApplication, SupportTicket, SupportMessage, SupportStaff,
 
 } from "./services/marketplace";
 
@@ -40,9 +42,9 @@ import "./App.css";
 
 
 
-type Section = "catalog" | "cart" | "orders" | "listings" | "inventory" | "users" | "audit" | "seller-application" | "applications";
+type Section = "catalog" | "favorites" | "cart" | "orders" | "listings" | "inventory" | "users" | "audit" | "seller-application" | "applications" | "support";
 
-const roleName: Record<UserRole, string> = { ADMINISTRADOR: "Administrador", VENDEDOR: "Vendedor", COMPRADOR: "Comprador" };
+const roleName: Record<UserRole, string> = { ADMINISTRADOR: "Administrador", VENDEDOR: "Vendedor", COMPRADOR: "Comprador", SOPORTE: "Soporte" };
 
 const currency = (value: number) => new Intl.NumberFormat("es-CO", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(value || 0);
 
@@ -50,11 +52,23 @@ const quantity = (value: number) => new Intl.NumberFormat("es-CO", { maximumFrac
 
 const productLabel = (value: string) => value === "COFFEE" ? "Café" : value === "COCOA" ? "Cacao" : value;
 
+const supportCategoryLabel: Record<string, string> = {
+  ACCOUNT_ACCESS: "Acceso a cuenta", ACCOUNT_RECOVERY: "Recuperación de cuenta", ORDERS: "Pedidos",
+  LISTINGS: "Publicaciones", INVENTORY: "Inventario", COMPLAINT: "Queja", CLAIM: "Reclamación", OTHER: "Otra consulta",
+};
+const supportPriorityLabel: Record<string, string> = { LOW: "Baja", NORMAL: "Normal", HIGH: "Alta", URGENT: "Urgente" };
+const formatSupportDate = (value?: string | null) => {
+  if (!value) return "Fecha no disponible";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("es-CO", { dateStyle: "medium", timeStyle: "short" }).format(date);
+};
+
 const statusLabel: Record<string, string> = {
 
   PUBLISHED: "Publicado", DRAFT: "Borrador", PAUSED: "Pausado", SOLD_OUT: "Agotado",
 
   CONFIRMED: "Confirmado", IN_PREPARATION: "En preparación", SHIPPED: "Enviado", DELIVERED: "Entregado", CANCELLED: "Cancelado",
+  NEW: "Nuevo", IN_REVIEW: "En revisión", WAITING_USER: "Esperando usuario", ESCALATED: "Escalado", RESOLVED: "Resuelto", CLOSED: "Cerrado",
 
   AVAILABLE: "Disponible", EXPORTED: "Agotado", RESERVED: "Reservado",
 
@@ -194,6 +208,20 @@ function App() {
   const [profiles, setProfiles] = useState<Record<string, ProfileOption[]>>({});
 
   const [audit, setAudit] = useState<AuditRecord[]>([]);
+  const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
+  const [ticketForm, setTicketForm] = useState({category:"OTHER",subject:"",description:""});
+  const [selectedTicketId, setSelectedTicketId] = useState<number|null>(null);
+  const [supportMessages, setSupportMessages] = useState<SupportMessage[]>([]);
+  const [supportMessagesLoading, setSupportMessagesLoading] = useState(false);
+  const [messageDraft, setMessageDraft] = useState("");
+  const [supportSearch, setSupportSearch] = useState("");
+  const [supportFilter, setSupportFilter] = useState("ALL");
+  const [showTicketForm, setShowTicketForm] = useState(false);
+  const [supportMobileInboxVisible, setSupportMobileInboxVisible] = useState(true);
+  const [supportAdmins, setSupportAdmins] = useState<SupportStaff[]>([]);
+  const [escalationDrafts, setEscalationDrafts] = useState<Record<number, { adminUserId: string; reason: string }>>({});
+  const [decisionDrafts, setDecisionDrafts] = useState<Record<number, { decision: "APPROVE_SUSPENSION" | "REJECT_SUSPENSION" | "REACTIVATE_SELLER" | "RESOLVE"; producerId: string; reason: string }>>({});
+  const [favoriteIds, setFavoriteIds] = useState<number[]>([]);
 
   const [mobileMenu, setMobileMenu] = useState(false);
 
@@ -225,7 +253,7 @@ function App() {
 
         const initialRole = activeUser.roles?.includes(activeUser.role) ? activeUser.role : activeUser.roles?.[0] || activeUser.role; setActiveRole(initialRole);
 
-        setSection(initialRole === "COMPRADOR" ? "catalog" : initialRole === "VENDEDOR" ? "listings" : "users");
+        setSection(initialRole === "COMPRADOR" ? "catalog" : initialRole === "VENDEDOR" ? "listings" : initialRole === "SOPORTE" ? "support" : "users");
 
       })
 
@@ -238,44 +266,78 @@ function App() {
 
 
   const refreshData = useCallback(async () => {
-
     if (!user) return;
-
     setError("");
-
     try {
-
       if (activeRole === "COMPRADOR") {
-
-        const [publicCatalog, nextCart, nextOrders] = await Promise.all([getCatalog(), getCart(), getMyOrders(activeRole)]);
-
-        setCatalog(publicCatalog); setCart(nextCart); setOrders(nextOrders); setMyApplications(await getMySellerApplications());
-
+        const [publicCatalog, nextCart, nextOrders, favorites, ownApplications, ownTickets] = await Promise.all([
+          getCatalog(), getCart(), getMyOrders(activeRole), getFavorites(), getMySellerApplications(), getMySupportTickets(),
+        ]);
+        setCatalog(publicCatalog);
+        setCart(nextCart);
+        setOrders(nextOrders);
+        setFavoriteIds(favorites.map(item => item.listingId));
+        setMyApplications(ownApplications);
+        setSupportTickets(ownTickets);
       } else if (activeRole === "VENDEDOR") {
-
-        const [nextListings, nextLots, nextProducts, nextOrders] = await Promise.all([getMyListings(), getMyLots(), getProducts(), getMyOrders(activeRole)]);
-
-        setCatalog([]); setListings(nextListings); setLots(nextLots); setProducts(nextProducts); setOrders(nextOrders);
-
-      } else {
-
-        const [nextUsers, nextAudit, sellers, nextApplications] = await Promise.all([getUsers(), getAuditLogs(), getAvailableProfiles("VENDEDOR"), getSellerApplications()]);
-
-        setCatalog([]); setUsers(nextUsers); setAudit(nextAudit); setProfiles({ VENDEDOR: sellers }); setApplications(nextApplications);
-
+        const [nextListings, nextLots, nextProducts, nextOrders, ownTickets] = await Promise.all([
+          getMyListings(), getMyLots(), getProducts(), getMyOrders(activeRole), getMySupportTickets(),
+        ]);
+        setCatalog([]);
+        setListings(nextListings);
+        setLots(nextLots);
+        setProducts(nextProducts);
+        setOrders(nextOrders);
+        setSupportTickets(ownTickets);
+      } else if (activeRole === "SOPORTE") {
+        const [nextSupport, admins] = await Promise.all([getSupportTickets(), getSupportAdmins()]);
+        setCatalog([]);
+        setSupportTickets(nextSupport);
+        setSupportAdmins(admins);
+      } else if (activeRole === "ADMINISTRADOR") {
+        const [nextUsers, nextAudit, sellers, nextApplications, nextSupport] = await Promise.all([
+          getUsers(), getAuditLogs(), getAvailableProfiles("VENDEDOR"), getSellerApplications(), getSupportTickets(),
+        ]);
+        setCatalog([]);
+        setUsers(nextUsers);
+        setAudit(nextAudit);
+        setProfiles({ VENDEDOR: sellers });
+        setApplications(nextApplications);
+        setSupportTickets(nextSupport);
       }
-
     } catch (err) {
-
       setError(err instanceof Error ? err.message : "No fue posible cargar la información.");
-
     }
-
   }, [user, activeRole]);
 
 
-
   useEffect(() => { void refreshData(); }, [refreshData, refresh]);
+
+  useEffect(() => {
+    if (section !== "support") return;
+    if (!supportTickets.length) {
+      setSelectedTicketId(null);
+      setSupportMessages([]);
+      return;
+    }
+    if (selectedTicketId === null || !supportTickets.some(ticket => ticket.id === selectedTicketId)) {
+      setSelectedTicketId(supportTickets[0].id);
+    }
+  }, [section, supportTickets, selectedTicketId]);
+
+  useEffect(() => {
+    if (section !== "support" || selectedTicketId === null) {
+      setSupportMessages([]);
+      return;
+    }
+    let active = true;
+    setSupportMessagesLoading(true);
+    getSupportMessages(selectedTicketId)
+      .then(messages => { if (active) setSupportMessages(messages); })
+      .catch(err => { if (active) setError(err instanceof Error ? err.message : "No fue posible cargar la conversación."); })
+      .finally(() => { if (active) setSupportMessagesLoading(false); });
+    return () => { active = false; };
+  }, [section, selectedTicketId, user?.id, activeRole]);
 
 
 
@@ -293,13 +355,26 @@ function App() {
 
   };
 
+  const toggleFavorite = (listingId: number) => void action(async () => {
+    if (favoriteIds.includes(listingId)) await removeFavorite(listingId);
+    else await addFavorite(listingId);
+  }, favoriteIds.includes(listingId) ? "Publicación eliminada de favoritos." : "Publicación guardada en favoritos.");
+
+  const updateEscalationDraft = (ticketId: number, patch: Partial<{ adminUserId: string; reason: string }>) => {
+    setEscalationDrafts(current => ({ ...current, [ticketId]: { ...(current[ticketId] ?? { adminUserId: "", reason: "" }), ...patch } }));
+  };
+
+  const updateDecisionDraft = (ticketId: number, patch: Partial<{ decision: "APPROVE_SUSPENSION" | "REJECT_SUSPENSION" | "REACTIVATE_SELLER" | "RESOLVE"; producerId: string; reason: string }>) => {
+    setDecisionDrafts(current => ({ ...current, [ticketId]: { ...(current[ticketId] ?? { decision: "RESOLVE", producerId: "", reason: "" }), ...patch } }));
+  };
+
 
 
   const handleLogin = async (username: string, password: string) => {
 
     setLoginBusy(true); setLoginError("");
 
-    try { const signedIn = await login(username, password); setUser(signedIn); const initialRole = signedIn.roles?.includes(signedIn.role) ? signedIn.role : signedIn.roles?.[0] || signedIn.role; setActiveRole(initialRole); setSection(initialRole === "COMPRADOR" ? "catalog" : initialRole === "VENDEDOR" ? "listings" : "users"); }
+    try { const signedIn = await login(username, password); setUser(signedIn); const initialRole = signedIn.roles?.includes(signedIn.role) ? signedIn.role : signedIn.roles?.[0] || signedIn.role; setActiveRole(initialRole); setSection(initialRole === "COMPRADOR" ? "catalog" : initialRole === "VENDEDOR" ? "listings" : initialRole === "SOPORTE" ? "support" : "users"); }
 
     catch (err) { setLoginError(err instanceof Error ? err.message : "No se pudo iniciar sesión."); }
 
@@ -321,22 +396,47 @@ function App() {
 
   const menu: { id: Section; label: string; icon: typeof ShoppingBag }[] = activeRole === "ADMINISTRADOR" ? [
 
-    { id: "users", label: "Cuentas y perfiles", icon: Users }, { id: "applications", label: "Solicitudes de vendedor", icon: ClipboardList }, { id: "audit", label: "Auditoría", icon: FileClock },
+    { id: "support", label: "Mesa de ayuda", icon: ClipboardList }, { id: "users", label: "Cuentas y perfiles", icon: Users }, { id: "applications", label: "Solicitudes de vendedor", icon: ClipboardList }, { id: "audit", label: "Auditoría", icon: FileClock },
+
+  ] : activeRole === "SOPORTE" ? [
+    { id: "support", label: "Mesa de ayuda", icon: ClipboardList },
 
   ] : activeRole === "VENDEDOR" ? [
 
-    { id: "listings", label: "Mis publicaciones", icon: Package }, { id: "inventory", label: "Mi inventario", icon: Warehouse }, { id: "orders", label: "Pedidos recibidos", icon: ClipboardList },
+    { id: "support", label: "Mesa de ayuda", icon: ClipboardList }, { id: "listings", label: "Mis publicaciones", icon: Package }, { id: "inventory", label: "Mi inventario", icon: Warehouse }, { id: "orders", label: "Pedidos recibidos", icon: ClipboardList },
 
   ] : [
 
-    { id: "catalog", label: "Catálogo", icon: ShoppingBag }, { id: "cart", label: "Mi carrito", icon: ShoppingCart }, { id: "orders", label: "Mis pedidos", icon: ClipboardList }, { id: "seller-application", label: "Quiero ser vendedor", icon: Factory },
+    { id: "support", label: "Mesa de ayuda", icon: ClipboardList }, { id: "catalog", label: "Catálogo", icon: ShoppingBag }, { id: "favorites", label: "Mis favoritos", icon: Heart }, { id: "cart", label: "Mi carrito", icon: ShoppingCart }, { id: "orders", label: "Mis pedidos", icon: ClipboardList }, { id: "seller-application", label: "Quiero ser vendedor", icon: Factory },
 
   ];
 
 
 
   const filteredCatalog = useMemo(() => catalog.filter(item => `${item.title} ${item.product.name} ${item.producer.name} ${item.product.productType}`.toLowerCase().includes(search.toLowerCase())), [catalog, search]);
+  const favoriteListings = useMemo(() => catalog.filter(item => favoriteIds.includes(item.id)), [catalog, favoriteIds]);
+  const sellerProducerOptions = useMemo(() => {
+    // Only linked seller accounts can be suspended/reactivated from an administrative decision.
+    // Unlinked legacy producer records have no account holder to whom the action can be attributed.
+    return users
+      .filter(account => account.active && account.roles?.includes("VENDEDOR") && account.profileId && account.producerProfileLabel)
+      .map(account => ({ id: account.profileId as number, label: account.producerProfileLabel as string }));
+  }, [users]);
 
+  const selectedSupportTicket = useMemo(
+    () => supportTickets.find(ticket => ticket.id === selectedTicketId) ?? null,
+    [supportTickets, selectedTicketId],
+  );
+  const filteredSupportTickets = useMemo(() => {
+    const query = supportSearch.trim().toLocaleLowerCase("es");
+    return supportTickets.filter(ticket => {
+      const matchesStatus = supportFilter === "ALL" || ticket.status === supportFilter;
+      const searchable = `${ticket.ticketCode} ${ticket.subject} ${ticket.description} ${ticket.requesterName} ${ticket.requesterEmail}`.toLocaleLowerCase("es");
+      return matchesStatus && (!query || searchable.includes(query));
+    });
+  }, [supportTickets, supportSearch, supportFilter]);
+  const openSupportCount = supportTickets.filter(ticket => !["RESOLVED", "CLOSED"].includes(ticket.status)).length;
+  const urgentSupportCount = supportTickets.filter(ticket => ["HIGH", "URGENT"].includes(ticket.priority) && !["RESOLVED", "CLOSED"].includes(ticket.status)).length;
 
 
   const saveLot = (event: FormEvent) => {
@@ -360,10 +460,10 @@ function App() {
     event.preventDefault();
 
     void action(() => createUser(accountForm), accountForm.role === "COMPRADOR"
-
       ? "Cuenta de comprador y perfil de cliente creados correctamente."
-
-      : "Cuenta de administrador creada correctamente.")
+      : accountForm.role === "SOPORTE"
+        ? "Cuenta de soporte creada correctamente."
+        : "Cuenta de administrador creada correctamente.")
 
       .then(() => setAccountForm({ fullName: "", username: "", email: "", password: "", role: "COMPRADOR", companyName: "", contactName: "", country: "", phone: "", address: "" }));
 
@@ -411,7 +511,7 @@ function App() {
 
         <nav className="side-nav">
 
-          {menu.map(item => { const Icon = item.icon; return <button key={item.id} className={`nav-item ${section === item.id ? "active" : ""}`} onClick={() => { setSection(item.id); setMobileMenu(false); }}><Icon size={18} /><span>{item.label}</span>{item.id === "cart" && cart?.items?.length ? <em>{cart.items.length}</em> : null}</button>; })}
+          {menu.map(item => { const Icon = item.icon; return <button key={item.id} className={`nav-item ${section === item.id ? "active" : ""}`} onClick={() => { setSection(item.id); if (item.id === "support") setSupportMobileInboxVisible(true); setMobileMenu(false); }}><Icon size={18} /><span>{item.label}</span>{item.id === "cart" && cart?.items?.length ? <em>{cart.items.length}</em> : null}</button>; })}
 
         </nav>
 
@@ -423,7 +523,7 @@ function App() {
 
       <main className="main-area">
 
-        <header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu-button" onClick={() => setMobileMenu(true)} aria-label="Abrir menú"><Menu /></button><div><div className="breadcrumb">RiTech SAS <span>/</span> {menu.find(m => m.id === section)?.label || "Marketplace"}</div><h1>{section === "catalog" ? "Explora el origen" : menu.find(m => m.id === section)?.label || "Marketplace"}</h1></div></div><div className="topbar-right"><div className="topbar-user"><span className="status-dot" /> Sesión activa</div>{user.roles && user.roles.length > 1 && <select className="compact-select" value={activeRole} onChange={e => {const next=e.target.value as UserRole;setActiveRole(next);setSection(next === "COMPRADOR" ? "catalog" : next === "VENDEDOR" ? "listings" : "users");}}>{user.roles.map(r => <option key={r} value={r}>{roleName[r]}</option>)}</select>}<div className="avatar small">{user.fullName.slice(0, 1).toUpperCase()}</div></div></header>
+        <header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu-button" onClick={() => setMobileMenu(true)} aria-label="Abrir menú"><Menu /></button><div><div className="breadcrumb">RiTech SAS <span>/</span> {menu.find(m => m.id === section)?.label || "Marketplace"}</div><h1>{section === "catalog" ? "Explora el origen" : menu.find(m => m.id === section)?.label || "Marketplace"}</h1></div></div><div className="topbar-right"><div className="topbar-user"><span className="status-dot" /> Sesión activa</div>{user.roles && user.roles.length > 1 && <select className="compact-select" value={activeRole} onChange={e => {const next=e.target.value as UserRole;setActiveRole(next);setSection(next === "COMPRADOR" ? "catalog" : next === "VENDEDOR" ? "listings" : next === "SOPORTE" ? "support" : "users");setSupportMobileInboxVisible(true);}}>{user.roles.map(r => <option key={r} value={r}>{roleName[r]}</option>)}</select>}<div className="avatar small">{user.fullName.slice(0, 1).toUpperCase()}</div></div></header>
 
         <div className="content-area">
 
@@ -431,6 +531,132 @@ function App() {
 
           {notice && <div className="alert success page-alert"><Check size={16} /> {notice}</div>}
 
+          {section === "support" && <>
+            <div className="support-page-heading">
+              <div>
+                <span className="eyebrow">ATENCIÓN Y ACOMPAÑAMIENTO</span>
+                <h2>{activeRole === "SOPORTE" ? "Centro de atención" : activeRole === "ADMINISTRADOR" ? "Casos escalados" : "Mis solicitudes de soporte"}</h2>
+                <p className="muted">{activeRole === "SOPORTE" ? "Atiende cada solicitud en una conversación independiente y escala únicamente los casos que requieran una decisión administrativa." : activeRole === "ADMINISTRADOR" ? "Revisa únicamente los casos que fueron escalados a tu cuenta y registra decisiones trazables." : "Consulta tus casos y comunícate directamente con el equipo de atención de RiTech."}</p>
+              </div>
+              {(activeRole === "COMPRADOR" || activeRole === "VENDEDOR") && <button className="btn primary" onClick={() => setShowTicketForm(value => !value)}><Plus size={16}/>{showTicketForm ? "Cerrar formulario" : "Nueva solicitud"}</button>}
+            </div>
+
+            {(activeRole === "COMPRADOR" || activeRole === "VENDEDOR") && showTicketForm && <form className="panel support-create-panel" onSubmit={e => {
+              e.preventDefault();
+              void action(async () => {
+                const created = await createSupportTicket(ticketForm);
+                const refreshedTickets = await getMySupportTickets();
+                setSupportTickets(refreshedTickets);
+                setSelectedTicketId(created.id);
+                setSupportMobileInboxVisible(false);
+                setTicketForm({ category: "OTHER", subject: "", description: "" });
+                setShowTicketForm(false);
+              }, "Solicitud creada correctamente. Ya puedes conversar con soporte.");
+            }}>
+              <div className="support-create-title"><div className="support-icon"><MessageCircle size={19}/></div><div><h3>Cuéntanos cómo podemos ayudarte</h3><p>Se creará un caso privado vinculado a tu cuenta.</p></div></div>
+              <div className="form-grid">
+                <label>Categoría<select value={ticketForm.category} onChange={e=>setTicketForm({...ticketForm,category:e.target.value})}><option value="OTHER">Otra consulta</option><option value="ACCOUNT_ACCESS">Acceso a cuenta</option><option value="ACCOUNT_RECOVERY">Recuperación de cuenta</option><option value="ORDERS">Pedidos</option><option value="LISTINGS">Publicaciones</option><option value="INVENTORY">Inventario</option><option value="COMPLAINT">Queja</option><option value="CLAIM">Reclamación</option></select></label>
+                <label>Asunto<input required maxLength={180} value={ticketForm.subject} onChange={e=>setTicketForm({...ticketForm,subject:e.target.value})} placeholder="Ej. No puedo acceder a mi cuenta"/></label>
+                <label className="full-width">Descripción<textarea required rows={3} value={ticketForm.description} onChange={e=>setTicketForm({...ticketForm,description:e.target.value})} placeholder="Describe el problema y los pasos que realizaste..."/></label>
+              </div>
+              <div className="support-create-footer"><span><ShieldCheck size={14}/> No incluyas contraseñas ni datos confidenciales.</span><button className="btn primary" disabled={busy || !ticketForm.subject.trim() || !ticketForm.description.trim()}>Enviar solicitud</button></div>
+            </form>}
+
+            <div className="support-overview">
+              <div className="support-stat-card"><span className="support-stat-icon"><Inbox size={17}/></span><div><strong>{supportTickets.length}</strong><small>{activeRole === "COMPRADOR" || activeRole === "VENDEDOR" ? "Mis solicitudes" : "Casos recibidos"}</small></div></div>
+              <div className="support-stat-card"><span className="support-stat-icon open"><Clock3 size={17}/></span><div><strong>{openSupportCount}</strong><small>Casos pendientes</small></div></div>
+              <div className="support-stat-card"><span className="support-stat-icon urgent"><Activity size={17}/></span><div><strong>{urgentSupportCount}</strong><small>Prioridad alta o urgente</small></div></div>
+            </div>
+
+            <div className={`support-workspace ${selectedSupportTicket ? "has-selection" : ""} ${supportMobileInboxVisible ? "mobile-inbox-visible" : ""}`}>
+              <aside className="panel support-inbox">
+                <div className="support-inbox-header"><div><h3>{activeRole === "COMPRADOR" || activeRole === "VENDEDOR" ? "Mis conversaciones" : "Bandeja de entrada"}</h3><p>{filteredSupportTickets.length} {filteredSupportTickets.length === 1 ? "caso" : "casos"}</p></div><span className="support-inbox-count">{supportTickets.length}</span></div>
+                <div className="support-search"><Search size={16}/><input value={supportSearch} onChange={e=>setSupportSearch(e.target.value)} placeholder="Buscar por caso o usuario..." aria-label="Buscar solicitudes"/></div>
+                <div className="support-filters" role="group" aria-label="Filtrar solicitudes">
+                  {[{value:"ALL",label:"Todos"},{value:"NEW",label:"Nuevos"},{value:"IN_REVIEW",label:"En revisión"},{value:"ESCALATED",label:"Escalados"},{value:"RESOLVED",label:"Resueltos"}].filter(filter => filter.value !== "ESCALATED" || activeRole === "SOPORTE" || activeRole === "ADMINISTRADOR").map(filter=><button key={filter.value} className={supportFilter === filter.value ? "active" : ""} onClick={()=>setSupportFilter(filter.value)}>{filter.label}</button>)}
+                </div>
+                <div className="support-ticket-list">
+                  {filteredSupportTickets.map(ticket=><button type="button" key={ticket.id} className={`support-ticket-row ${selectedTicketId === ticket.id ? "selected" : ""}`} onClick={()=>{setSelectedTicketId(ticket.id);setSupportMobileInboxVisible(false);setMessageDraft("");}}>
+                    <div className="support-ticket-row-top"><span>{ticket.ticketCode}</span><StatusPill value={ticket.status}/></div>
+                    <strong>{ticket.subject}</strong>
+                    <p>{ticket.description}</p>
+                    <div className="support-ticket-row-bottom"><span>{activeRole === "SOPORTE" || activeRole === "ADMINISTRADOR" ? ticket.requesterName : supportCategoryLabel[ticket.category] || ticket.category}</span><small>{formatSupportDate(ticket.createdAt)}</small></div>
+                    <div className="support-ticket-meta"><span className={`priority-dot ${ticket.priority.toLowerCase()}`}/>{supportPriorityLabel[ticket.priority] || ticket.priority}<span>·</span>{supportCategoryLabel[ticket.category] || ticket.category}</div>
+                  </button>)}
+                  {!filteredSupportTickets.length && <div className="support-list-empty"><Inbox size={25}/><strong>{supportTickets.length ? "No encontramos casos" : "Tu bandeja está vacía"}</strong><span>{supportTickets.length ? "Prueba con otro filtro o término de búsqueda." : (activeRole === "COMPRADOR" || activeRole === "VENDEDOR") ? "Cuando crees una solicitud, podrás conversar aquí con soporte." : "Las solicitudes nuevas aparecerán aquí."}</span></div>}
+                </div>
+              </aside>
+
+              {selectedSupportTicket ? <section className="panel support-detail">
+                <div className="support-detail-header">
+                  <button className="support-mobile-back" onClick={()=>setSupportMobileInboxVisible(true)} aria-label="Volver a la bandeja"><ArrowLeft size={17}/></button>
+                  <div className="support-detail-title"><span className="eyebrow">{selectedSupportTicket.ticketCode}</span><h3>{selectedSupportTicket.subject}</h3><div className="support-detail-subtitle"><span>{supportCategoryLabel[selectedSupportTicket.category] || selectedSupportTicket.category}</span><span>·</span><span>{formatSupportDate(selectedSupportTicket.createdAt)}</span></div></div>
+                  <div className="support-detail-status"><StatusPill value={selectedSupportTicket.status}/><span className={`priority-label ${selectedSupportTicket.priority.toLowerCase()}`}>{supportPriorityLabel[selectedSupportTicket.priority] || selectedSupportTicket.priority} prioridad</span></div>
+                </div>
+
+                {(activeRole === "SOPORTE" || activeRole === "ADMINISTRADOR") && <div className="support-requester-strip"><div className="support-avatar requester"><UserRound size={17}/></div><div><strong>{selectedSupportTicket.requesterName}</strong><span>{selectedSupportTicket.requesterEmail} · {roleName[selectedSupportTicket.requesterRole as UserRole] || selectedSupportTicket.requesterRole}</span></div><span className="support-requester-label">Solicitante</span></div>}
+                {selectedSupportTicket.escalationReason && <div className="support-escalation-banner"><ShieldCheck size={16}/><div><strong>Motivo del escalamiento</strong><span>{selectedSupportTicket.escalationReason}</span></div></div>}
+
+                <div className="support-chat-area">
+                  <div className="support-chat-date"><span>Inicio de la solicitud</span></div>
+                  <div className="support-message-row incoming">
+                    <div className="support-avatar"><UserRound size={16}/></div>
+                    <div className="support-message-content"><div className="support-message-author">{selectedSupportTicket.requesterName} <span>· Solicitante</span></div><div className="support-message-bubble">{selectedSupportTicket.description}</div><time>{formatSupportDate(selectedSupportTicket.createdAt)}</time></div>
+                  </div>
+                  {supportMessagesLoading && <div className="support-loading"><span className="loading-dot"/> Cargando conversación…</div>}
+                  {!supportMessagesLoading && supportMessages.map(message=>{
+                    const ownMessage = message.senderUserId === user.id;
+                    const isRequesterMessage = message.senderType === "REQUESTER";
+                    const author = message.senderName || (isRequesterMessage ? selectedSupportTicket.requesterName : message.senderType === "ADMINISTRATOR" ? "Administración" : "Equipo de soporte");
+                    return <div key={message.id} className={`support-message-row ${ownMessage ? "outgoing" : "incoming"} ${message.internal ? "internal" : ""}`}>
+                      {!ownMessage && <div className={`support-avatar ${isRequesterMessage ? "requester" : "staff"}`}>{isRequesterMessage ? <UserRound size={16}/> : <ShieldCheck size={16}/>}</div>}
+                      <div className="support-message-content"><div className="support-message-author">{ownMessage ? "Tú" : author} <span>· {isRequesterMessage ? "Solicitante" : message.senderType === "ADMINISTRATOR" ? "Administrador" : "Soporte"}</span>{message.internal && <em>Nota interna</em>}</div><div className="support-message-bubble">{message.message}</div><time>{formatSupportDate(message.createdAt)}</time></div>
+                      {ownMessage && <div className="support-avatar own"><UserRound size={16}/></div>}
+                    </div>;
+                  })}
+                  {!supportMessagesLoading && !supportMessages.length && <div className="support-first-reply"><MessageCircle size={16}/> Aún no hay respuestas. El equipo de soporte continuará la atención por este medio.</div>}
+                </div>
+
+                {(activeRole === "SOPORTE" || activeRole === "ADMINISTRADOR" || selectedSupportTicket.status !== "CLOSED") ? <form className="support-composer" onSubmit={e=>{
+                  e.preventDefault();
+                  const content = messageDraft.trim();
+                  if (!content) return;
+                  void action(async()=>{
+                    await sendSupportMessage(selectedSupportTicket.id, content);
+                    setMessageDraft("");
+                    setSupportMessages(await getSupportMessages(selectedSupportTicket.id));
+                  },"Mensaje enviado correctamente.");
+                }}>
+                  <textarea rows={2} maxLength={3000} value={messageDraft} onChange={e=>setMessageDraft(e.target.value)} placeholder="Escribe una respuesta para esta conversación…" aria-label="Escribe una respuesta"/>
+                  <div className="support-composer-footer"><span><ShieldCheck size={13}/> No compartas contraseñas, códigos ni datos bancarios.</span><button className="btn primary" disabled={busy || !messageDraft.trim()}><Send size={15}/> Enviar</button></div>
+                </form> : <div className="support-closed-note">Este caso está cerrado. Puedes consultar el historial, pero no enviar nuevos mensajes.</div>}
+
+                {activeRole === "SOPORTE" && <div className="support-management-panel">
+                  <div className="support-management-heading"><div><span className="eyebrow">GESTIÓN INTERNA</span><h3>Administrar solicitud</h3><p>Estas acciones no forman parte de la conversación con el usuario.</p></div><span className="support-management-icon"><ClipboardList size={18}/></span></div>
+                  {selectedSupportTicket.status !== "ESCALATED" && selectedSupportTicket.status !== "RESOLVED" && selectedSupportTicket.status !== "CLOSED" ? <>
+                    <div className="support-inline-controls"><label>Estado<select value={selectedSupportTicket.status} onChange={e=>void action(async()=>{await updateSupportTicket(selectedSupportTicket.id,{status:e.target.value});setSupportTickets(await getSupportTickets());},"Estado actualizado.")}><option value="NEW">Nuevo</option><option value="IN_REVIEW">En revisión</option><option value="WAITING_USER">Esperando usuario</option></select></label><label>Prioridad<select value={selectedSupportTicket.priority} onChange={e=>void action(async()=>{await updateSupportTicket(selectedSupportTicket.id,{priority:e.target.value});setSupportTickets(await getSupportTickets());},"Prioridad actualizada.")}><option value="LOW">Baja</option><option value="NORMAL">Normal</option><option value="HIGH">Alta</option><option value="URGENT">Urgente</option></select></label></div>
+                    <form className="support-escalate-form" onSubmit={e=>{e.preventDefault();const draft=escalationDrafts[selectedSupportTicket.id];if(!draft?.adminUserId||!draft.reason.trim()){setError("Selecciona un administrador y escribe el motivo del escalamiento.");return;}void action(async()=>{await escalateSupportTicket(selectedSupportTicket.id,Number(draft.adminUserId),draft.reason);setSupportTickets(await getSupportTickets());},"Caso escalado al administrador asignado.");}}>
+                      <div className="support-management-subheading"><strong>¿Requiere una decisión administrativa?</strong><span>Escala este caso a un administrador específico.</span></div>
+                      <label>Administrador responsable<select required value={escalationDrafts[selectedSupportTicket.id]?.adminUserId || ""} onChange={e=>updateEscalationDraft(selectedSupportTicket.id,{adminUserId:e.target.value})}><option value="">Selecciona un administrador</option>{supportAdmins.map(admin=><option key={admin.id} value={admin.id}>{admin.fullName} (@{admin.username})</option>)}</select></label>
+                      <label>Motivo del escalamiento<textarea required rows={2} value={escalationDrafts[selectedSupportTicket.id]?.reason || ""} onChange={e=>updateEscalationDraft(selectedSupportTicket.id,{reason:e.target.value})} placeholder="Explica por qué este caso necesita una decisión administrativa"/></label>
+                      <button className="btn secondary" disabled={busy || !supportAdmins.length}><ArrowLeft size={15}/> Escalar caso</button>
+                    </form>
+                  </> : <div className="support-workflow-notice"><ShieldCheck size={17}/><span>{selectedSupportTicket.status === "ESCALATED" ? "El caso está en revisión administrativa. Espera la decisión del administrador asignado." : `Este caso se encuentra ${selectedSupportTicket.status === "RESOLVED" ? "resuelto" : "cerrado"}. La gestión está finalizada.`}</span></div>}
+                </div>}
+
+                {activeRole === "ADMINISTRADOR" && selectedSupportTicket.status === "ESCALATED" && selectedSupportTicket.escalatedTo === user.id && <div className="support-management-panel admin">
+                  <div className="support-management-heading"><div><span className="eyebrow">REVISIÓN ADMINISTRATIVA</span><h3>Registrar decisión</h3><p>La decisión quedará asociada al caso y registrada en auditoría.</p></div><span className="support-management-icon"><ShieldCheck size={18}/></span></div>
+                  <p className="support-admin-guidance">La suspensión comercial conserva el rol VENDEDOR y el historial de la cuenta. Selecciona cuidadosamente el productor afectado.</p>
+                  <form className="support-decision-form" onSubmit={e=>{e.preventDefault();const draft=decisionDrafts[selectedSupportTicket.id] || {decision:"RESOLVE" as const,producerId:"",reason:""};if(!draft.reason.trim()){setError("Escribe la justificación de la decisión.");return;}if((draft.decision === "APPROVE_SUSPENSION" || draft.decision === "REACTIVATE_SELLER") && !draft.producerId){setError("Selecciona el perfil de productor para esta decisión.");return;}void action(async()=>{await reviewEscalatedSupportTicket(selectedSupportTicket.id,draft.decision,draft.reason,draft.producerId?Number(draft.producerId):undefined);setSupportTickets(await getSupportTickets());setSelectedTicketId(null);},"Decisión registrada. El caso quedó resuelto.");}}>
+                    <label>Decisión<select value={decisionDrafts[selectedSupportTicket.id]?.decision || "RESOLVE"} onChange={e=>updateDecisionDraft(selectedSupportTicket.id,{decision:e.target.value as "APPROVE_SUSPENSION"|"REJECT_SUSPENSION"|"REACTIVATE_SELLER"|"RESOLVE"})}><option value="RESOLVE">Resolver caso sin suspensión</option><option value="APPROVE_SUSPENSION">Aprobar suspensión comercial</option><option value="REJECT_SUSPENSION">Rechazar solicitud de suspensión</option><option value="REACTIVATE_SELLER">Aprobar reactivación comercial</option></select></label>
+                    {(["APPROVE_SUSPENSION","REACTIVATE_SELLER"] as string[]).includes(decisionDrafts[selectedSupportTicket.id]?.decision || "RESOLVE") && <label>Vendedor / productor<select required value={decisionDrafts[selectedSupportTicket.id]?.producerId || ""} onChange={e=>updateDecisionDraft(selectedSupportTicket.id,{producerId:e.target.value})}><option value="">Selecciona un vendedor</option>{sellerProducerOptions.map(option=><option key={option.id} value={option.id}>{option.label} (ID {option.id})</option>)}</select></label>}
+                    <label>Justificación de la decisión<textarea required rows={3} value={decisionDrafts[selectedSupportTicket.id]?.reason || ""} onChange={e=>updateDecisionDraft(selectedSupportTicket.id,{reason:e.target.value})} placeholder="Explica la decisión y sus fundamentos"/></label>
+                    <button className="btn primary" disabled={busy}>Registrar decisión</button>
+                  </form>
+                </div>}
+              </section> : <section className="panel support-no-selection"><div className="support-no-selection-icon"><MessageCircle size={27}/></div><h3>Selecciona una conversación</h3><p>Elige un caso de la bandeja para consultar su historial y responder de forma privada.</p></section>}
+            </div>
+          </>}
 
 
           {section === "catalog" && activeRole === "COMPRADOR" && <>
@@ -439,7 +665,7 @@ function App() {
 
             <div className="section-heading"><div><span className="eyebrow">CATÁLOGO DISPONIBLE</span><h2>Productos destacados</h2><p className="muted">Publicaciones activas de vendedores registrados.</p></div><div className="search-box"><Search size={17} /><input placeholder="Buscar producto o productor" value={search} onChange={e => setSearch(e.target.value)} /></div></div>
 
-            <div className="listing-grid">{filteredCatalog.map(item => <ListingCard key={item.id} listing={item} buyer onAdd={() => action(() => addCartItem(item.id, item.minimumOrderKg), "Producto agregado al carrito.")} busy={busy} />)}</div>
+            <div className="listing-grid">{filteredCatalog.map(item => <ListingCard key={item.id} listing={item} buyer favorite={favoriteIds.includes(item.id)} onFavorite={() => toggleFavorite(item.id)} onAdd={() => action(() => addCartItem(item.id, item.minimumOrderKg), "Producto agregado al carrito.")} busy={busy} />)}</div>
 
             {!filteredCatalog.length && <EmptyState icon={<Package />} title="No hay publicaciones disponibles" detail="Cuando un vendedor publique productos, aparecerán aquí." />}
 
@@ -448,6 +674,12 @@ function App() {
           </>}
 
 
+
+          {section === "favorites" && activeRole === "COMPRADOR" && <>
+            <div className="section-heading"><div><span className="eyebrow">PUBLICACIONES GUARDADAS</span><h2>Mis favoritos</h2><p className="muted">Guarda publicaciones para consultarlas más adelante. Solo se muestran anuncios que siguen activos y disponibles.</p></div></div>
+            <div className="listing-grid">{favoriteListings.map(item => <ListingCard key={item.id} listing={item} buyer favorite onFavorite={() => toggleFavorite(item.id)} onAdd={() => action(() => addCartItem(item.id, item.minimumOrderKg), "Producto agregado al carrito.")} busy={busy}/>)}</div>
+            {!favoriteListings.length && <EmptyState icon={<Heart/>} title="Todavía no tienes favoritos disponibles" detail="Guarda publicaciones desde el catálogo con el botón de corazón." action={<button className="btn primary" onClick={()=>setSection("catalog")}>Explorar catálogo <ArrowRight size={16}/></button>}/>}
+          </>}
 
           {section === "cart" && activeRole === "COMPRADOR" && <>
 
@@ -570,7 +802,7 @@ function App() {
 
                 <label>Contraseña inicial<input type="password" value={accountForm.password} onChange={e => setAccountForm({ ...accountForm, password: e.target.value })} required minLength={12} maxLength={72} /></label>
 
-                <label>Rol<select value={accountForm.role} onChange={e => setAccountForm({ ...accountForm, role: e.target.value as UserRole })}><option value="COMPRADOR">Comprador</option><option value="ADMINISTRADOR">Administrador</option></select></label>
+                <label>Rol<select value={accountForm.role} onChange={e => setAccountForm({ ...accountForm, role: e.target.value as UserRole })}><option value="COMPRADOR">Comprador</option><option value="ADMINISTRADOR">Administrador</option><option value="SOPORTE">Soporte</option></select></label>
 
                 {accountForm.role === "COMPRADOR" && <>
 
@@ -696,10 +928,8 @@ function App() {
 
 
 
-function ListingCard({ listing, buyer, seller, onAdd, onStatus, busy }: { listing: ListingView; buyer?: boolean; seller?: boolean; onAdd?: () => void; onStatus?: (status: string) => void; busy: boolean }) {
-
-  return <article className="listing-card"><div className={`listing-cover ${listing.product.productType === "COCOA" ? "cocoa" : "coffee"}`}><div className="cover-label"><span>{productLabel(listing.product.productType)}</span><BadgeCheck size={17} /></div><div className="cover-art">{listing.product.productType === "COCOA" ? <Sprout size={56} strokeWidth={1.1} /> : <Coffee size={56} strokeWidth={1.1} />}</div><span className="cover-origin">ORIGEN COLOMBIA</span></div><div className="listing-info"><div className="listing-title-row"><div><h3>{listing.title}</h3><span className="producer-name"><Factory size={14} /> {listing.producer.name}</span></div>{seller && <StatusPill value={listing.status} />}</div>{listing.description && <p className="listing-description">{listing.description}</p>}<div className="listing-meta"><div><small>DISPONIBLE</small><strong>{quantity(listing.inventoryLot.quantity)} kg</strong></div><div><small>PEDIDO MÍNIMO</small><strong>{quantity(listing.minimumOrderKg)} kg</strong></div></div><div className="listing-bottom"><div><small>PRECIO POR KG</small><strong className="listing-price">{currency(listing.priceUsdPerKg)}</strong></div>{buyer && <button className="btn primary" onClick={onAdd} disabled={busy || listing.inventoryLot.quantity < listing.minimumOrderKg}>Agregar <ShoppingCart size={16} /></button>}{seller && <select className="status-select" value={listing.status} disabled={busy || listing.status === "SOLD_OUT"} onChange={e => onStatus?.(e.target.value)}><option value="PUBLISHED">Publicado</option><option value="PAUSED">Pausar</option><option value="DRAFT">Borrador</option></select>}</div></div></article>;
-
+function ListingCard({ listing, buyer, seller, favorite, onFavorite, onAdd, onStatus, busy }: { listing: ListingView; buyer?: boolean; seller?: boolean; favorite?: boolean; onFavorite?: () => void; onAdd?: () => void; onStatus?: (status: string) => void; busy: boolean }) {
+  return <article className="listing-card"><div className={`listing-cover ${listing.product.productType === "COCOA" ? "cocoa" : "coffee"}`}><div className="cover-label"><span>{productLabel(listing.product.productType)}</span><BadgeCheck size={17} /></div><div className="cover-art">{listing.product.productType === "COCOA" ? <Sprout size={56} strokeWidth={1.1} /> : <Coffee size={56} strokeWidth={1.1} />}</div><span className="cover-origin">ORIGEN COLOMBIA</span>{buyer && <button type="button" className={`favorite-action ${favorite ? "active" : ""}`} title={favorite ? "Quitar de favoritos" : "Guardar en favoritos"} aria-label={favorite ? "Quitar de favoritos" : "Guardar en favoritos"} onClick={onFavorite} disabled={busy}><Heart size={18} fill={favorite ? "currentColor" : "none"}/></button>}</div><div className="listing-info"><div className="listing-title-row"><div><h3>{listing.title}</h3><span className="producer-name"><Factory size={14} /> {listing.producer.name}</span></div>{seller && <StatusPill value={listing.status} />}</div>{listing.description && <p className="listing-description">{listing.description}</p>}<div className="listing-meta"><div><small>DISPONIBLE</small><strong>{quantity(listing.inventoryLot.quantity)} kg</strong></div><div><small>PEDIDO MÍNIMO</small><strong>{quantity(listing.minimumOrderKg)} kg</strong></div></div><div className="listing-bottom"><div><small>PRECIO POR KG</small><strong className="listing-price">{currency(listing.priceUsdPerKg)}</strong></div>{buyer && <button className="btn primary" onClick={onAdd} disabled={busy || listing.inventoryLot.quantity < listing.minimumOrderKg}>Agregar <ShoppingCart size={16} /></button>}{seller && <select className="status-select" value={listing.status} disabled={busy || listing.status === "SOLD_OUT"} onChange={e => onStatus?.(e.target.value)}><option value="PUBLISHED">Publicado</option><option value="PAUSED">Pausar</option><option value="DRAFT">Borrador</option></select>}</div></div></article>;
 }
 
 
